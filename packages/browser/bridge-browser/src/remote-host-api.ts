@@ -44,6 +44,11 @@ export interface TypertGatewayLike {
     readonly method: string
     readonly args: Readonly<Record<string, unknown>>
     readonly signal?: AbortSignal
+    /**
+     * dsh 0.2.1 requires the calling Peer on every in-process invocation; it is
+     * absent from older runtimes, which ignore the slot when it is omitted.
+     */
+    readonly peer?: unknown
   }): Promise<unknown>
 }
 
@@ -54,6 +59,27 @@ export interface TypertGatewayLike {
  */
 const EMPTY_WIRE_UPLINK: AsyncIterable<unknown> = {
   async *[Symbol.asyncIterator]() { /* no uplink items */ },
+}
+
+/**
+ * Owner Peer used for every in-process Gateway call.
+ *
+ * dsh 0.2.1 removed the Gateway's own `operatorPeer()` fallback and now asserts
+ * `peer.signal` in assertPeerLive/requireInteractions before opening `$events`.
+ * Passing `undefined` therefore crashes the event stream (hello.ok →
+ * stream-failed → WS 1011). dsh 0.2.0 never read the slot, so `undefined` was
+ * harmless there; keeping `undefined` here preserves that legacy path.
+ */
+let bridgePeer: unknown
+
+/** Install the Peer built from the dsh connection service. */
+export function setBridgePeer(peer: unknown): void {
+  bridgePeer = peer
+}
+
+/** Read the installed Peer; `undefined` keeps the legacy three-arg path. */
+export function getBridgePeer(): unknown {
+  return bridgePeer
 }
 
 /**
@@ -70,7 +96,8 @@ function openWireStream(gateway: TypertGatewayLike, endpoint: string, payload: u
   if (open.length === 3) {
     return open(endpoint, payload, signal)
   }
-  return open(endpoint, payload, EMPTY_WIRE_UPLINK, undefined, signal)
+  if (bridgePeer === undefined) throw new Error('bridge-browser: gateway Peer is not initialized')
+  return open(endpoint, payload, EMPTY_WIRE_UPLINK, bridgePeer, signal)
 }
 
 /** Structural subset of dsh 0.2's Host Connection service. */

@@ -41,6 +41,8 @@ import { purgeSessionFiles, type SessionPurgeDeps } from './session-purge.ts'
 import { resolveToken } from './token.ts'
 import {
   createRemoteHostApi,
+  getBridgePeer,
+  setBridgePeer,
   type HostConnectionLike,
   type TypertGatewayLike,
 } from './remote-host-api.ts'
@@ -141,8 +143,39 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     throw new Error('bridge-browser: dsh 0.2.0-rc.1 or a compatible newer runtime is required (Gateway wireStream unavailable)')
   }
   if (connection === undefined) throw new Error('bridge-browser: dsh connection service is required')
+  setBridgePeer(createOwnerPeer(connection))
   const tokenRes = await resolveToken(resolved.token)
-  mountBridge(ctx, resolved, tokenRes, createRemoteHostApi(gateway, connection))
+  mountBridge(ctx, resolved, tokenRes, createRemoteHostApi(peerBoundGateway(gateway), connection))
+}
+
+/**
+ * Build the owner Peer the dsh 0.2.1 Gateway requires on every in-process call.
+ * `connection.createPeer` is the public factory; older runtimes without it fall
+ * back to the shared browser Peer, and runtimes with neither keep `undefined`
+ * so the legacy three-arg path still works.
+ */
+function createOwnerPeer(connection: HostConnectionLike): unknown {
+  const peerSource = connection as unknown as {
+    createPeer?: (options: unknown) => unknown
+    browserPeer?: unknown
+  }
+  if (typeof peerSource.createPeer === 'function') {
+    return peerSource.createPeer({ principal: { kind: 'owner' }, interactions: 'answer' })
+  }
+  return peerSource.browserPeer
+}
+
+/** Forward `invoke` with the owner Peer attached; `wireStream` passes through untouched. */
+function peerBoundGateway(gateway: TypertGatewayLike): TypertGatewayLike {
+  return {
+    get wireStream() {
+      return gateway.wireStream
+    },
+    invoke(request) {
+      const peer = getBridgePeer()
+      return gateway.invoke(peer === undefined ? request : { ...request, peer })
+    },
+  }
 }
 
 function mountBridge(
