@@ -5,7 +5,19 @@
 
 /* jscpd:ignore-start */
 import type { Context } from '@deepseek-ai/cordis'
-import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
+
+/**
+ * Structural stand-in for `@deepseek-ai/dsh-invariants`' `InvariantInstaller`.
+ * That package stopped shipping after dsh 0.2.0-rc.2, so importing the type
+ * would break peer resolution on 0.2.1+. The runtime contract is a no-arg
+ * function, which is all this companion ever provides.
+ */
+type InvariantInstaller = () => void
+
+/** The slice of the retired `invariants` service this companion touches. */
+interface InvariantsService {
+  register(packageName: string, install: InvariantInstaller): () => void
+}
 
 const PACKAGE_NAME = '@yuxianglin/dsh-bridge-browser'
 
@@ -29,5 +41,5 @@ const install: InvariantInstaller = () => {}
  * @returns the installed registration's disposer after setup succeeds.
  */
 export const apply = (ctx: Context): Promise<() => void> =>
-  Promise.resolve(ctx.invariants.register(PACKAGE_NAME, install))
+  Promise.resolve((ctx as unknown as { invariants: InvariantsService }).invariants.register(PACKAGE_NAME, install))
 /* jscpd:ignore-end */
